@@ -1,0 +1,112 @@
+Author:  U.S.Khokhar (@USKhokhar)
+License: Same terms as Vim itself (see |license|)
+
+CONTENTS                                        *gh-review-contents*
+
+1. Introduction ............... |gh-review-intro|
+2. Requirements ............... |gh-review-requirements|
+3. Installation ............... |gh-review-installation|
+4. Configuration .............. |gh-review-configuration|
+5. Commands ................... |gh-review-commands|
+6. Mappings ................... |gh-review-mappings|
+7. FAQ ........................ |gh-review-faq|
+
+==============================================================================
+1. Introduction                                 *gh-review-intro*
+
+vim-gh-review is a plugin that allows you to review GitHub pull requests
+directly from Vim. It provides functionality to list, review, comment on,
+approve, and merge PRs without leaving your editor.
+
+==============================================================================
+2. Requirements                                 *gh-review-requirements*
+
+- Vim compiled with |+job| and |+json| features
+- curl command-line tool
+- A GitHub personal access token with appropriate permissions
+
+==============================================================================
+3. Installation                                 *gh-review-installation*
+
+Using vim-plug:
+>
+    Plug 'yourusername/vim-gh-review'
+<
+
+Other plugin managers should work similarly.
+
+After installation, set up your GitHub token:
+>
+    :GHSetupToken
+<
+
+==============================================================================
+4. Configuration                                *gh-review-configuration*
+
+                                                *g:gh_review_token_file*
+Path to store your GitHub token. Default: ~/.gh_review_token
+>
+    let g:gh_review_token_file = '~/.config/gh_review_token'
+<
+
+                                                *g:gh_review_cache_dir*
+Directory to store cached PR data. Default: ~/.cache/vim-gh-review
+>
+    let g:gh_review_cache_dir = '~/.cache/gh_review'
+<
+
+==============================================================================
+5. Commands                                     *gh-review-commands*
+
+:GHListPRs                                      *:GHListPRs*
+    List all open pull requests for the current repository.
+
+:GHReview {pr_number}                           *:GHReview*
+    Open a specific pull request for review.
+
+:GHComment [line_number]                        *:GHComment*
+    Add a comment to the current PR. If called from a diff view,
+    it will try to add the comment to the specific file and line.
+
+:GHApprove {pr_number}                          *:GHApprove*
+    Approve the specified pull request.
+
+:GHRequestChanges {pr_number}                   *:GHRequestChanges*
+    Request changes for the specified pull request.
+
+:GHMerge {pr_number}                            *:GHMerge*
+    Merge the specified pull request. You will be prompted for
+    merge method and commit message.
+
+:GHSetupToken                                   *:GHSetupToken*
+    Set up your GitHub personal access token.
+
+==============================================================================
+6. Mappings                                     *gh-review-mappings*
+
+In PR list buffer:
+    <CR>        - Open the PR under cursor for review
+
+In PR review buffer:
+    <leader>c   - Add comment at current position
+    <leader>a   - Approve the PR
+    <leader>r   - Request changes for the PR
+    <leader>m   - Merge the PR
+
+==============================================================================
+7. FAQ                                          *gh-review-faq*
+
+Q: What permissions does my GitHub token need?
+A: Your token needs "repo" scope to access private repositories and
+   "public_repo" scope for public repositories.
+
+Q: Can I review PRs from repositories I don't own?
+A: Yes, as long as you have access to the repository and your token has the
+   appropriate permissions.
+
+Q: Does this work with GitHub Enterprise?
+A: Not by default, but you could modify the API endpoints in the code
+   to point to your GitHub Enterprise instance.
+
+==============================================================================
+ vim:tw=78:ts=8:ft=help:norl:
