@@ -97,10 +97,13 @@ function! gh_review#list_prs() abort
 
 		echom "Fetching PRs for " . repo_info.owner . "/" . repo_info.repo . "..."
 
-		let cmd = ['curl', '-s', '-H', 'Authorization: token ' . token,
-					\ 'https://api.github.com/repos/' . repo_info.owner . '/' . repo_info.repo . '/pulls?state=open']
+		" Build the GitHub API URL
+		let api_url = 'https://api.github.com/repos/' . repo_info.owner . '/' . repo_info.repo . '/pulls?state=open'
 
-		let result = system(join(cmd, ' '))
+		" Use shellescape to properly quote the URL and token
+		let cmd = 'curl -s -H ' . shellescape('Authorization: token ' . token) . ' ' . shellescape(api_url)
+
+		let result = system(cmd)
 		if v:shell_error != 0
 			throw "Failed to fetch PRs: " . result
 		endif
@@ -114,7 +117,7 @@ function! gh_review#list_prs() abort
 		if empty(prs)
 			echom "No open PRs found!"
 			return
-		endif
+		endif	
 
 		" Create new buffer for PR list
 		silent! execute 'new [GH-PR-List]'
