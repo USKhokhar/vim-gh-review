@@ -1,7 +1,7 @@
 " Syntax highlighting for GitHub PR List
 
 if exists("b:current_syntax")
-  finish
+	finish
 endif
 
 syntax match ghPRHeader /^# .*$/
