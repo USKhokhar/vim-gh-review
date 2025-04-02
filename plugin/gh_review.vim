@@ -35,5 +35,5 @@ command! -nargs=? GHComment call gh_review#comment(<f-args>)
 command! -nargs=1 GHApprove call gh_review#approve(<f-args>)
 command! -nargs=1 GHRequest call gh_review#request_changes(<f-args>)
 command! -nargs=1 -complete=customlist,gh_review#complete_merge_strategies GHMerge call gh_review#merge(<f-args>)
-command! -nargs=0 GHSetToken call gh_review#setup_token()
+command! -nargs=0 GHSetToken call gh_review#set_token()
 
