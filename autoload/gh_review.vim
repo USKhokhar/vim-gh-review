@@ -60,12 +60,31 @@ function! gh_review#get_repo_info() abort
 
 	" Parse owner and repo from remote URL
 	let remote_url = trim(remote_url)
-	let pattern = '.\+github\.com[:/]\([^/]\+\)/\([^/]\+\)\(\.git\)\?$'
-	let owner = substitute(remote_url, pattern, '\1', '')
-	let repo = substitute(remote_url, pattern, '\2', '')
+	let owner = ''
+	let repo = ''
+
+	" Handle SSH URL format (git@github.com:user/repo.git or git@custom-host:user/repo.git)
+	let ssh_pattern = '^\s*git@.\+:\([^/]\+\)/\([^/]\+\)\(\.git\)\?\s*$'
+	if remote_url =~# ssh_pattern
+		let owner = substitute(remote_url, ssh_pattern, '\1', '')
+		let repo = substitute(remote_url, ssh_pattern, '\2', '')
+	else
+		" Handle HTTPS URL format (https://github.com/user/repo.git)
+		let https_pattern = '.\+github\.com[:/]\([^/]\+\)/\([^/]\+\)\(\.git\)\?$'
+		if remote_url =~# https_pattern
+			let owner = substitute(remote_url, https_pattern, '\1', '')
+			let repo = substitute(remote_url, https_pattern, '\2', '')
+		else
+			throw "Unsupported git remote format: " . remote_url
+		endif
+	endif
 
 	" Remove .git suffix if present
 	let repo = substitute(repo, '\.git$', '', '')
+
+	" Debug info
+	echom "Parsed remote URL: " . remote_url
+	echom "Owner: " . owner . " | Repo: " . repo
 
 	return {'owner': owner, 'repo': repo}
 endfunction
