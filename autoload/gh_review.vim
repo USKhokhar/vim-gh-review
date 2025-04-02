@@ -4,13 +4,14 @@
 
 " Function to retrieve the GitHub Token:
 function! gh_review#get_token() abort
-	if filereadable(g:gh_review_token_file)
-		return trim(readfile(g:gh_review_token_file)[0])
+	let token_file = expand(g:gh_review_token_file)
+	if filereadable(token_file)
+		return trim(readfile(token_file)[0])
 	endif
 
-	call gh_review#setup_token()
-	if filereadable(g:gh_review_token_file)
-		return trim(readfile(g:gh_review_token_file)[0])
+	call gh_review#set_token()
+	if filereadable(token_file)
+		return trim(readfile(token_file)[0])
 	endif
 
 	throw "GitHub token not found! Please run :GHSetToken first."
@@ -33,11 +34,21 @@ function! gh_review#set_token() abort
 		return
 	endif
 
-	call writefile([token], g:gh_review_token_file)
-	call setfperm(g:gh_review_token_file, 'rw--------')
+	call writefile([token], expand(g:gh_review_token_file))
+	" Use system call for file permissions which is more reliable
+	if has('unix')
+		call system('chmod 600 ' . shellescape(expand(g:gh_review_token_file)))
+	elseif has('win32')
+		" On Windows, just make the file hidden
+		call system('attrib +h ' . shellescape(expand(g:gh_review_token_file)))
+	endif
 	echom "GitHub token saved successfully!"
 endfunction
 
+" Add the missing setup_token function that matches command call
+function! gh_review#setup_token() abort
+	call gh_review#set_token()
+endfunction
 
 " Get current repository information
 function! gh_review#get_repo_info() abort
@@ -75,7 +86,12 @@ function! gh_review#list_prs() abort
 			throw "Failed to fetch PRs: " . result
 		endif
 
-		let prs = json_decode(result)
+		try
+			let prs = json_decode(result)
+		catch
+			throw "Invalid JSON response from GitHub API: " . result
+		endtry
+
 		if empty(prs)
 			echom "No open PRs found!"
 			return
@@ -154,7 +170,11 @@ function! gh_review#review(pr_number) abort
 			throw "Failed to fetch PR details: " . result
 		endif
 
-		let pr = json_decode(result)
+		try
+			let pr = json_decode(result)
+		catch
+			throw "Invalid JSON response from GitHub API: " . result
+		endtry
 
 		" Get PR diff
 		let cmd = ['curl', '-s', '-H', 'Authorization: token ' . token,

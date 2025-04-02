@@ -1,5 +1,3 @@
-" gh_review/api.vim - API interaction functions
-
 " Function to make an API request to GitHub
 function! gh_review#api#request(endpoint, method, headers, data) abort
 	let token = gh_review#get_token()
@@ -37,19 +35,34 @@ endfunction
 function! gh_review#api#get_json(endpoint, headers = {}) abort
 	let headers = extend({'Accept': 'application/json'}, a:headers)
 	let result = gh_review#api#request(a:endpoint, 'GET', headers, {})
-	return json_decode(result)
+
+	try
+		return json_decode(result)
+	catch
+		throw "Failed to parse API response as JSON: " . result
+	endtry
 endfunction
 
 " Function to post data to API
 function! gh_review#api#post_json(endpoint, data, headers = {}) abort
 	let headers = extend({'Content-Type': 'application/json', 'Accept': 'application/json'}, a:headers)
 	let result = gh_review#api#request(a:endpoint, 'POST', headers, a:data)
-	return json_decode(result)
+
+	try
+		return json_decode(result)
+	catch
+		throw "Failed to parse API response as JSON: " . result
+	endtry
 endfunction
 
 " Function to put data to API
 function! gh_review#api#put_json(endpoint, data, headers = {}) abort
 	let headers = extend({'Content-Type': 'application/json', 'Accept': 'application/json'}, a:headers)
 	let result = gh_review#api#request(a:endpoint, 'PUT', headers, a:data)
-	return json_decode(result)
+
+	try
+		return json_decode(result)
+	catch
+		throw "Failed to parse API response as JSON: " . result
+	endtry
 endfunction
