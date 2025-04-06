@@ -89,7 +89,7 @@ function! gh_review#get_repo_info() abort
 	return {'owner': owner, 'repo': repo}
 endfunction
 
-" List pull requests
+" Improved PR list function in autoload/gh_review.vim
 function! gh_review#list_prs() abort
 	try
 		let token = gh_review#get_token()
@@ -100,37 +100,46 @@ function! gh_review#list_prs() abort
 		" Build the GitHub API URL
 		let api_url = 'https://api.github.com/repos/' . repo_info.owner . '/' . repo_info.repo . '/pulls?state=open'
 
-		" Use shellescape to properly quote the URL and token
-		let cmd = 'curl -s -H ' . shellescape('Authorization: token ' . token) . ' ' . shellescape(api_url)
-
-		let result = system(cmd)
-		if v:shell_error != 0
-			throw "Failed to fetch PRs: " . result
-		endif
-
-		try
-			let prs = json_decode(result)
-		catch
-			throw "Invalid JSON response from GitHub API: " . result
-		endtry
+		" Use the improved API function
+		let prs = gh_review#api#get_json(api_url)
 
 		if empty(prs)
 			echom "No open PRs found!"
 			return
-		endif	
+		endif
 
 		" Create new buffer for PR list
 		silent! execute 'new [GH-PR-List]'
 		setlocal buftype=nofile bufhidden=wipe noswapfile nowrap
 		setlocal filetype=gh_pr_list
 
-		" Populate buffer with PR info
+		" Populate buffer with PR info in a cleaner format
 		call setline(1, "# Open Pull Requests for " . repo_info.owner . "/" . repo_info.repo)
 		call append(line('$'), "")
+		call append(line('$'), "ID  | PR #    | Title                                            | Author       | Updated")
+		call append(line('$'), "----|---------|-------------------------------------------------|--------------|--------")
 
 		let idx = 1
 		for pr in prs
-			let line = printf("%d. #%d: %s", idx, pr.number, pr.title)
+			" Format the date to be more readable
+			let updated_at = substitute(pr.updated_at, 'T', ' ', 'g')
+			let updated_at = substitute(updated_at, 'Z', '', 'g')
+			let updated_at = strpart(updated_at, 0, 16)  " Just show date and time, not seconds
+
+			" Truncate long titles
+			let title = pr.title
+			if len(title) > 48
+				let title = strpart(title, 0, 45) . '...'
+			endif
+
+			" Format the line with proper alignment
+			let line = printf("%-3d | #%-6d | %-48s | %-12s | %s",
+						\ idx,
+						\ pr.number,
+						\ title,
+						\ pr.user.login,
+						\ updated_at)
+
 			call append(line('$'), line)
 			let idx += 1
 		endfor
@@ -142,7 +151,7 @@ function! gh_review#list_prs() abort
 		let b:gh_prs = prs
 
 		" Move cursor to first PR
-		normal! 3G
+		normal! 5G
 
 	catch
 		echohl ErrorMsg
@@ -151,7 +160,7 @@ function! gh_review#list_prs() abort
 	endtry
 endfunction
 
-" Helper function to review PR under cursor
+" Updated helper function to review PR under cursor
 function! s:review_pr_under_cursor() abort
 	if !exists('b:gh_prs')
 		echohl ErrorMsg
@@ -161,7 +170,7 @@ function! s:review_pr_under_cursor() abort
 	endif
 
 	let line_text = getline('.')
-	let pr_idx_match = matchlist(line_text, '^\(\d\+\)\.')
+	let pr_idx_match = matchlist(line_text, '^\s*\(\d\+\)\s*|')
 
 	if empty(pr_idx_match)
 		echohl ErrorMsg
@@ -178,68 +187,105 @@ function! s:review_pr_under_cursor() abort
 endfunction
 
 " Review a specific PR
+" Improved PR review function in autoload/gh_review.vim
 function! gh_review#review(pr_number) abort
 	try
 		let token = gh_review#get_token()
 		let repo_info = gh_review#get_repo_info()
 
 		" Get PR details
-		let cmd = ['curl', '-s', '-H', 'Authorization: token ' . token,
-					\ 'https://api.github.com/repos/' . repo_info.owner . '/' . repo_info.repo . '/pulls/' . a:pr_number]
+		let endpoint = 'https://api.github.com/repos/' . repo_info.owner . '/' . repo_info.repo . '/pulls/' . a:pr_number
+		let pr = gh_review#api#get_json(endpoint)
 
-		let result = system(join(cmd, ' '))
-		if v:shell_error != 0
-			throw "Failed to fetch PR details: " . result
-		endif
-
-		try
-			let pr = json_decode(result)
-		catch
-			throw "Invalid JSON response from GitHub API: " . result
-		endtry
+		" Get PR files
+		let files_endpoint = endpoint . '/files'
+		let pr_files = gh_review#api#get_json(files_endpoint)
 
 		" Get PR diff
-		let cmd = ['curl', '-s', '-H', 'Authorization: token ' . token,
-					\ '-H', 'Accept: application/vnd.github.v3.diff',
-					\ 'https://api.github.com/repos/' . repo_info.owner . '/' . repo_info.repo . '/pulls/' . a:pr_number]
-
-		let diff = system(join(cmd, ' '))
-		if v:shell_error != 0
-			throw "Failed to fetch PR diff: " . diff
-		endif
+		let headers = {'Accept': 'application/vnd.github.v3.diff'}
+		let diff = gh_review#api#request(endpoint, 'GET', headers, {})
 
 		" Create new buffer for PR review
 		silent! execute 'new [GH-PR-#' . a:pr_number . ']'
 		setlocal buftype=nofile bufhidden=wipe noswapfile
-		setlocal filetype=diff
+		setlocal filetype=gh_pr
 
 		" Store PR info
 		let b:gh_pr = pr
 		let b:gh_pr_number = a:pr_number
 		let b:gh_repo_info = repo_info
+		let b:gh_pr_files = pr_files
 
-		" Add PR metadata at the top
+		" Add PR metadata at the top in a more structured format
 		call setline(1, "# PR #" . a:pr_number . ": " . pr.title)
+		call append(line('$'), "")
 		call append(line('$'), "Author: " . pr.user.login)
 		call append(line('$'), "Branch: " . pr.head.ref . " → " . pr.base.ref)
-		call append(line('$'), "")
-		call append(line('$'), pr.body)
-		call append(line('$'), "")
-		call append(line('$'), "---")
+		call append(line('$'), "Created: " . substitute(pr.created_at, 'T', ' ', 'g'))
+		call append(line('$'), "URL: " . pr.html_url)
 		call append(line('$'), "")
 
-		" Add diff content
+		" Add PR description with proper formatting
+		call append(line('$'), "## Description")
+		call append(line('$'), "")
+		if !empty(pr.body)
+			for line in split(pr.body, '\n')
+				call append(line('$'), line)
+			endfor
+		else
+			call append(line('$'), "*No description provided*")
+		endif
+		call append(line('$'), "")
+
+		" Add files section
+		call append(line('$'), "## Files Changed (" . len(pr_files) . ")")
+		call append(line('$'), "")
+		let file_index = 1
+		for file in pr_files
+			let status = file.status
+			let status_symbol = '•'
+			if status == 'added'
+				let status_symbol = '+'
+			elseif status == 'removed'
+				let status_symbol = '-'
+			elseif status == 'modified'
+				let status_symbol = 'M'
+			elseif status == 'renamed'
+				let status_symbol = '→'
+			endif
+
+			call append(line('$'), file_index . ". [" . status_symbol . "] " . file.filename . 
+						\ " (" . file.changes . " changes: +" . file.additions . " -" . file.deletions . ")")
+			let file_index += 1
+		endfor
+		call append(line('$'), "")
+
+		" Add review controls section
+		call append(line('$'), "## Review Controls")
+		call append(line('$'), "")
+		call append(line('$'), "- Press <leader>c to add a comment")
+		call append(line('$'), "- Press <leader>a to approve the PR")
+		call append(line('$'), "- Press <leader>r to request changes")
+		call append(line('$'), "- Press <leader>m to merge the PR")
+		call append(line('$'), "- Press <leader>f to open a specific file in the PR")
+		call append(line('$'), "")
+
+		" Add diff content with a header
+		call append(line('$'), "## Diff")
+		call append(line('$'), "")
 		let diff_lines = split(diff, '\n')
 		call append(line('$'), diff_lines)
 
 		" Add mappings for the PR review buffer
-		nnoremap <buffer> <leader>c :call gh_review#comment('')<CR>
+		nnoremap <buffer> <leader>c :call gh_review#comment()<CR>
 		nnoremap <buffer> <leader>a :call gh_review#approve(b:gh_pr_number)<CR>
 		nnoremap <buffer> <leader>r :call gh_review#request_changes(b:gh_pr_number)<CR>
 		nnoremap <buffer> <leader>m :call gh_review#merge(b:gh_pr_number)<CR>
+		nnoremap <buffer> <leader>f :call <SID>open_pr_file()<CR>
 
-		" Move cursor to the start of the diff
-		normal! 9G
+		" Move cursor to the start of the PR description
+		call search("^## Description")
+		normal! j
 
 	catch
 		echohl ErrorMsg
@@ -248,7 +294,127 @@ function! gh_review#review(pr_number) abort
 	endtry
 endfunction
 
-" Add a comment to the PR
+" New function to open a specific file from the PR
+function! s:open_pr_file() abort
+	if !exists('b:gh_pr_files') || empty(b:gh_pr_files)
+		echohl ErrorMsg
+		echom "PR files information not available!"
+		echohl None
+		return
+	endif
+
+	" Create a numbered list of files
+	let file_list = []
+	let idx = 1
+	for file in b:gh_pr_files
+		call add(file_list, idx . ". " . file.filename)
+		let idx += 1
+	endfor
+
+	" Display file list in a preview window
+	silent! execute 'pedit PR-Files'
+	wincmd P
+	setlocal buftype=nofile bufhidden=wipe noswapfile
+	call setline(1, "Select a file number to open:")
+	call append(line('$'), "")
+	call append(line('$'), file_list)
+	wincmd p
+
+	" Ask user to select a file
+	echohl Question
+	let file_idx = input('Enter file number to open: ')
+	echohl None
+
+	" Close preview window
+	pclose
+
+	" Validate and process input
+	if empty(file_idx) || file_idx !~ '^\d\+$'
+		echom "Invalid file number."
+		return
+	endif
+
+	let file_idx = str2nr(file_idx) - 1
+	if file_idx < 0 || file_idx >= len(b:gh_pr_files)
+		echohl ErrorMsg
+		echom "File number out of range."
+		echohl None
+		return
+	endif
+
+	let file = b:gh_pr_files[file_idx]
+
+	" Get file content for both base and head versions
+	let repo_info = b:gh_repo_info
+	let pr = b:gh_pr
+
+	" URL for base (original) version
+	let base_content_endpoint = 'https://api.github.com/repos/' . repo_info.owner . '/' . repo_info.repo .
+				\ '/contents/' . file.filename . '?ref=' . pr.base.sha
+
+	" URL for head (changed) version
+	let head_content_endpoint = 'https://api.github.com/repos/' . repo_info.owner . '/' . repo_info.repo .
+				\ '/contents/' . file.filename . '?ref=' . pr.head.sha
+
+	try
+		" For added files, base version doesn't exist
+		let base_content = ''
+		if file.status != 'added'
+			let base_response = gh_review#api#get_json(base_content_endpoint)
+			if has_key(base_response, 'content')
+				let base_content = system('echo ' . shellescape(base_response.content) . ' | base64 --decode')
+			endif
+		endif
+
+		" For deleted files, head version doesn't exist
+		let head_content = ''
+		if file.status != 'removed'
+			let head_response = gh_review#api#get_json(head_content_endpoint)
+			if has_key(head_response, 'content')
+				let head_content = system('echo ' . shellescape(head_response.content) . ' | base64 --decode')
+			endif
+		endif
+
+		" Open file versions in split views
+		silent! execute 'new [PR-' . pr.number . '-Base]-' . file.filename
+		setlocal buftype=nofile bufhidden=wipe noswapfile
+		if !empty(base_content)
+			call setline(1, split(base_content, '\n'))
+		else
+			call setline(1, "[File does not exist in base version]")
+		endif
+
+		" Try to set filetype based on filename extension
+		let ext = fnamemodify(file.filename, ':e')
+		if !empty(ext)
+			execute 'setlocal filetype=' . ext
+		endif
+
+		" Open head version in a vertical split
+		silent! execute 'vnew [PR-' . pr.number . '-Head]-' . file.filename
+		setlocal buftype=nofile bufhidden=wipe noswapfile
+		if !empty(head_content)
+			call setline(1, split(head_content, '\n'))
+		else
+			call setline(1, "[File does not exist in head version]")
+		endif
+
+		" Try to set filetype based on filename extension
+		if !empty(ext)
+			execute 'setlocal filetype=' . ext
+		endif
+
+		" Enable diff mode
+		windo diffthis
+
+	catch
+		echohl ErrorMsg
+		echom "Failed to fetch file content: " . v:exception
+		echohl None
+	endtry
+endfunction
+
+" Updated comment function in autoload/gh_review.vim
 function! gh_review#comment(...) abort
 	if !exists('b:gh_pr_number') || !exists('b:gh_repo_info')
 		echohl ErrorMsg
@@ -293,8 +459,6 @@ function! gh_review#comment(...) abort
 	endif
 
 	try
-		let token = gh_review#get_token()
-
 		" Create the comment payload
 		if !empty(path) && !empty(line_number)
 			" File-specific comment
@@ -307,26 +471,122 @@ function! gh_review#comment(...) abort
 
 			let endpoint = 'https://api.github.com/repos/' . b:gh_repo_info.owner . '/' . b:gh_repo_info.repo .
 						\ '/pulls/' . b:gh_pr_number . '/comments'
+
+			" Use the improved API function
+			let response = gh_review#api#post_json(endpoint, payload)
+
+			" Display success message with link to the comment
+			if has_key(response, 'html_url')
+				echom "Comment posted successfully! View at: " . response.html_url
+			else
+				echom "Comment posted successfully!"
+			endif
 		else
 			" General PR comment
 			let payload = {'body': comment_text}
 			let endpoint = 'https://api.github.com/repos/' . b:gh_repo_info.owner . '/' . b:gh_repo_info.repo .
 						\ '/issues/' . b:gh_pr_number . '/comments'
+
+			" Use the improved API function
+			let response = gh_review#api#post_json(endpoint, payload)
+
+			" Display success message with link to the comment
+			if has_key(response, 'html_url')
+				echom "Comment posted successfully! View at: " . response.html_url
+			else
+				echom "Comment posted successfully!"
+			endif
 		endif
 
-		let json_payload = json_encode(payload)
-		let cmd = ['curl', '-s', '-X', 'POST', '-H', 'Authorization: token ' . token,
-					\ '-H', 'Content-Type: application/json',
-					\ '-d', shellescape(json_payload),
-					\ endpoint]
+	catch
+		echohl ErrorMsg
+		echom v:exception
+		echohl None
+	endtry
+endfunction
 
-		let result = system(join(cmd, ' '))
+" Updated review submission function
+function! s:submit_review(pr_number, event) abort
+	try
+		let repo_info = gh_review#get_repo_info()
 
-		if v:shell_error != 0
-			throw "Failed to post comment: " . result
+		echohl Question
+		let review_comment = input('Review comment: ')
+		echohl None
+
+		if a:event !=# 'APPROVE' && empty(review_comment)
+			echom "Review cancelled. A comment is required for this review type."
+			return
 		endif
 
-		echom "Comment posted successfully!"
+		let payload = {
+					\ 'event': a:event,
+					\ 'body': review_comment
+					\ }
+
+		let endpoint = 'https://api.github.com/repos/' . repo_info.owner . '/' . repo_info.repo .
+					\ '/pulls/' . a:pr_number . '/reviews'
+
+		" Use the improved API function
+		let response = gh_review#api#post_json(endpoint, payload)
+
+		" Display success message with HTML URL if available
+		if has_key(response, 'html_url')
+			echom "Review submitted successfully! View at: " . response.html_url
+		else
+			echom "Review submitted successfully!"
+		endif
+
+	catch
+		echohl ErrorMsg
+		echom v:exception
+		echohl None
+	endtry
+endfunction
+
+" Updated merge function
+function! gh_review#merge(pr_number) abort
+	try
+		let repo_info = gh_review#get_repo_info()
+
+		echohl Question
+		let merge_method = input('Merge method (merge/squash/rebase): ', 'merge')
+		echohl None
+
+		if merge_method !~# '\v^(merge|squash|rebase)$'
+			echom "Invalid merge method. Must be one of: merge, squash, rebase."
+			return
+		endif
+
+		echohl Question
+		let commit_title = input('Commit title: ')
+		let commit_message = input('Commit message (optional): ')
+		echohl None
+
+		let payload = {
+					\ 'merge_method': merge_method
+					\ }
+
+		if !empty(commit_title)
+			let payload.commit_title = commit_title
+		endif
+
+		if !empty(commit_message)
+			let payload.commit_message = commit_message
+		endif
+
+		let endpoint = 'https://api.github.com/repos/' . repo_info.owner . '/' . repo_info.repo .
+					\ '/pulls/' . a:pr_number . '/merge'
+
+		" Use the improved API function
+		let response = gh_review#api#put_json(endpoint, payload)
+
+		" Display success message with commit SHA if available
+		if has_key(response, 'sha')
+			echom "PR #" . a:pr_number . " merged successfully! Commit SHA: " . response.sha
+		else
+			echom "PR #" . a:pr_number . " merged successfully!"
+		endif
 
 	catch
 		echohl ErrorMsg
@@ -389,63 +649,33 @@ function! s:submit_review(pr_number, event) abort
 	endtry
 endfunction
 
-" Merge a PR
-function! gh_review#merge(pr_number) abort
-	try
-		let token = gh_review#get_token()
-		let repo_info = gh_review#get_repo_info()
-
-		echohl Question
-		let merge_method = input('Merge method (merge/squash/rebase): ', 'merge')
-		echohl None
-
-		if merge_method !~# '\v^(merge|squash|rebase)$'
-			echom "Invalid merge method. Must be one of: merge, squash, rebase."
-			return
-		endif
-
-		echohl Question
-		let commit_title = input('Commit title: ')
-		let commit_message = input('Commit message (optional): ')
-		echohl None
-
-		let payload = {
-					\ 'merge_method': merge_method
-					\ }
-
-		if !empty(commit_title)
-			let payload.commit_title = commit_title
-		endif
-
-		if !empty(commit_message)
-			let payload.commit_message = commit_message
-		endif
-
-		let json_payload = json_encode(payload)
-		let endpoint = 'https://api.github.com/repos/' . repo_info.owner . '/' . repo_info.repo .
-					\ '/pulls/' . a:pr_number . '/merge'
-
-		let cmd = ['curl', '-s', '-X', 'PUT', '-H', 'Authorization: token ' . token,
-					\ '-H', 'Content-Type: application/json',
-					\ '-d', shellescape(json_payload),
-					\ endpoint]
-
-		let result = system(join(cmd, ' '))
-
-		if v:shell_error != 0
-			throw "Failed to merge PR: " . result
-		endif
-
-		echom "PR #" . a:pr_number . " merged successfully!"
-
-	catch
-		echohl ErrorMsg
-		echom v:exception
-		echohl None
-	endtry
-endfunction
-
 " Completion for merge strategies
 function! gh_review#complete_merge_strategies(ArgLead, CmdLine, CursorPos) abort
 	return filter(['merge', 'squash', 'rebase'], 'v:val =~ "^" . a:ArgLead')
+endfunction
+
+" refresh function to reload PR data
+function! gh_review#refresh() abort
+	" Check which buffer we're in
+	let bufname = bufname('%')
+
+	if bufname =~ '\[GH-PR-List\]'
+		" We're in PR list buffer, refresh it
+		call gh_review#list_prs()
+		return
+	endif
+
+	if bufname =~ '\[GH-PR-#\d\+\]'
+		" We're in PR review buffer, refresh it
+		let pr_num_match = matchlist(bufname, '#\(\d\+\)')
+		if !empty(pr_num_match)
+			let pr_number = pr_num_match[1]
+			call gh_review#review(pr_number)
+			return
+		endif
+	endif
+
+	echohl ErrorMsg
+	echom "Not in a GitHub PR buffer!"
+	echohl None
 endfunction
